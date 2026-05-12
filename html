@@ -1,0 +1,831 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ORBIT — 360° Particle Scanner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:     #02040e;
+  --scan:   #00ffe7;
+  --scan2:  #00b8ff;
+  --warn:   #ffbe00;
+  --hot:    #ff3d6b;
+  --border: rgba(0,255,231,0.14);
+  --text:   #c8f0ff;
+  --dim:    rgba(180,230,255,0.38);
+  --mono:   'Share Tech Mono', monospace;
+  --sans:   'Rajdhani', sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--sans);}
+body::before{content:'';position:fixed;inset:0;z-index:-1;
+  background:radial-gradient(ellipse 70% 60% at 20% 10%,rgba(0,180,255,0.05) 0%,transparent 55%),
+             radial-gradient(ellipse 60% 50% at 80% 90%,rgba(0,100,180,0.04) 0%,transparent 50%);}
+
+#app{display:flex;flex-direction:column;width:100%;height:100%;}
+#topbar{display:flex;align-items:center;gap:12px;padding:7px 16px;border-bottom:1px solid var(--border);background:rgba(2,4,18,0.98);flex-shrink:0;z-index:100;}
+#main{display:flex;flex:1;overflow:hidden;}
+#left-pane{width:42%;min-width:300px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid var(--border);background:rgba(2,5,16,0.98);position:relative;}
+#right-pane{flex:1;position:relative;background:#010308;}
+#bottombar{padding:6px 16px;border-top:1px solid var(--border);background:rgba(2,4,18,0.98);flex-shrink:0;display:flex;align-items:center;gap:14px;}
+
+/* TOP BAR */
+#logo{font-family:var(--mono);font-size:1rem;letter-spacing:0.26em;color:var(--scan);text-shadow:0 0 14px rgba(0,255,231,0.55);white-space:nowrap;}
+#logo span{color:rgba(0,255,231,0.3);font-size:0.6rem;letter-spacing:0.12em;margin-left:6px;vertical-align:middle;}
+#phase-badge{font-family:var(--mono);font-size:0.52rem;letter-spacing:0.16em;text-transform:uppercase;padding:3px 10px;border-radius:3px;border:1px solid var(--scan);color:var(--scan);background:rgba(0,255,231,0.06);white-space:nowrap;}
+#phase-badge.scanning{border-color:var(--warn);color:var(--warn);background:rgba(255,190,0,0.07);box-shadow:0 0 8px rgba(255,190,0,0.2);}
+#phase-badge.complete{border-color:#4ade80;color:#4ade80;background:rgba(74,222,128,0.07);}
+.tb-stat{font-family:var(--mono);font-size:0.48rem;letter-spacing:0.08em;color:var(--dim);white-space:nowrap;}
+.tb-stat em{color:var(--scan);font-style:normal;}
+#tb-sep{flex:1;}
+.tb-btn{background:rgba(0,255,231,0.05);border:1px solid rgba(0,255,231,0.24);color:var(--scan);font-family:var(--mono);font-size:0.50rem;letter-spacing:0.08em;text-transform:uppercase;padding:5px 12px;border-radius:3px;cursor:pointer;transition:all .16s;white-space:nowrap;}
+.tb-btn:hover{background:rgba(0,255,231,0.12);box-shadow:0 0 10px rgba(0,255,231,0.2);}
+.tb-btn.red{border-color:rgba(255,61,107,0.4);color:var(--hot);}
+.tb-btn.warn{border-color:rgba(255,190,0,0.45);color:var(--warn);}
+.tb-btn.on{background:rgba(0,255,231,0.1);border-color:rgba(0,255,231,0.6);}
+
+/* WEBCAM */
+#cam-wrap{position:relative;flex:1;overflow:hidden;background:#000;}
+#cam-video{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
+#cam-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;}
+#grid-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;}
+#flash{position:absolute;inset:0;background:rgba(0,255,231,0.22);opacity:0;pointer-events:none;z-index:15;transition:opacity .07s;}
+#scanline{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--scan),transparent);box-shadow:0 0 9px var(--scan);animation:scanAnim 2.8s linear infinite;pointer-events:none;z-index:16;opacity:0;}
+#scanline.on{opacity:1;}
+@keyframes scanAnim{0%{top:0}100%{top:100%}}
+
+/* OVERLAY */
+#overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:30;background:rgba(2,4,14,0.88);text-align:center;padding:20px;gap:12px;}
+#overlay.hidden{display:none;}
+.ov-title{font-family:var(--mono);font-size:1rem;letter-spacing:0.22em;color:var(--scan);text-shadow:0 0 18px rgba(0,255,231,0.6);}
+.ov-sub{font-family:var(--sans);font-size:0.95rem;color:var(--dim);font-weight:300;line-height:1.6;max-width:280px;}
+#btn-start-cam{font-family:var(--mono);font-size:0.62rem;letter-spacing:0.14em;text-transform:uppercase;padding:10px 24px;border:1px solid var(--scan);border-radius:4px;background:rgba(0,255,231,0.1);color:var(--scan);cursor:pointer;transition:all .18s;}
+#btn-start-cam:hover{background:rgba(0,255,231,0.2);box-shadow:0 0 16px rgba(0,255,231,0.3);}
+#btn-start-cam:disabled{opacity:0.3;cursor:not-allowed;}
+#file-warn{display:none;background:rgba(255,61,107,0.09);border:1px solid rgba(255,61,107,0.35);border-radius:5px;padding:10px 14px;font-family:var(--mono);font-size:0.46rem;letter-spacing:0.07em;color:var(--hot);line-height:1.9;text-align:left;max-width:310px;}
+#file-warn.show{display:block;}
+#file-warn code{background:rgba(255,61,107,0.14);padding:1px 5px;border-radius:2px;}
+
+/* CAMERA ERROR */
+#cam-error{display:none;position:absolute;inset:0;z-index:40;background:rgba(2,4,14,0.96);flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;gap:12px;}
+#cam-error.show{display:flex;}
+.ce-title{font-family:var(--mono);font-size:0.9rem;letter-spacing:0.2em;color:var(--hot);}
+.ce-body{font-family:var(--sans);font-size:0.9rem;color:var(--dim);font-weight:300;line-height:1.7;max-width:310px;}
+.ce-code{background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,231,0.16);border-radius:4px;padding:8px 14px;font-family:var(--mono);font-size:0.48rem;color:rgba(0,255,231,0.5);line-height:1.9;text-align:left;max-width:320px;white-space:pre-wrap;}
+
+/* CONTROLS */
+#ctrl-panel{background:rgba(2,5,18,0.98);border-top:1px solid var(--border);padding:10px 13px;display:flex;flex-direction:column;gap:8px;flex-shrink:0;}
+.ctrl-row{display:flex;align-items:center;gap:8px;}
+.ctrl-lbl{font-family:var(--mono);font-size:0.44rem;letter-spacing:0.09em;text-transform:uppercase;color:var(--dim);min-width:68px;flex-shrink:0;}
+.ctrl-val{font-family:var(--mono);font-size:0.44rem;color:var(--scan);min-width:36px;text-align:right;}
+input[type=range]{flex:1;height:2px;-webkit-appearance:none;background:rgba(0,255,231,0.13);border-radius:2px;cursor:pointer;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:var(--scan);cursor:pointer;box-shadow:0 0 6px var(--scan);}
+.ctrl-chk{display:flex;align-items:center;gap:6px;cursor:pointer;}
+.ctrl-chk input[type=checkbox]{width:11px;height:11px;accent-color:var(--scan);cursor:pointer;}
+.ctrl-chk label{font-family:var(--mono);font-size:0.44rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);cursor:pointer;}
+hr.ctrl-sep{border:none;border-top:1px solid rgba(0,255,231,0.07);}
+#btn-capture{width:100%;padding:8px;border:1px solid rgba(0,255,231,0.5);background:rgba(0,255,231,0.08);color:var(--scan);font-family:var(--mono);font-size:0.58rem;letter-spacing:0.12em;text-transform:uppercase;border-radius:3px;cursor:pointer;transition:all .16s;}
+#btn-capture:hover:not(:disabled){background:rgba(0,255,231,0.17);box-shadow:0 0 14px rgba(0,255,231,0.28);}
+#btn-capture:disabled{opacity:0.25;cursor:not-allowed;}
+
+/* RING */
+#ring-wrap{display:flex;align-items:center;justify-content:center;gap:12px;padding:7px 13px;border-top:1px solid rgba(0,255,231,0.06);background:rgba(1,3,12,0.98);flex-shrink:0;}
+#ring-canvas{width:90px;height:90px;flex-shrink:0;}
+.ring-info{display:flex;flex-direction:column;gap:3px;flex:1;}
+.ri-row{display:flex;justify-content:space-between;}
+.ri-lbl{font-family:var(--mono);font-size:0.42rem;letter-spacing:0.09em;text-transform:uppercase;color:var(--dim);}
+.ri-val{font-family:var(--mono);font-size:0.44rem;color:var(--scan);}
+#prog-wrap{height:3px;background:rgba(0,255,231,0.09);border-radius:2px;margin-top:5px;}
+#prog-bar{height:100%;background:linear-gradient(90deg,var(--scan2),var(--scan));border-radius:2px;width:0%;transition:width .28s;}
+
+/* 3D */
+#three-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;}
+#angle-hud{position:absolute;top:12px;left:12px;background:rgba(2,5,18,0.88);border:1px solid rgba(0,255,231,0.18);border-radius:5px;padding:8px 12px;backdrop-filter:blur(12px);}
+#angle-hud .ah-deg{font-family:var(--mono);font-size:1.7rem;color:var(--scan);line-height:1;text-shadow:0 0 18px rgba(0,255,231,0.45);}
+#angle-hud .ah-lbl{font-family:var(--mono);font-size:0.40rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--dim);margin-top:2px;}
+#angle-hud .ah-src{font-family:var(--mono);font-size:0.36rem;color:rgba(0,255,231,0.35);letter-spacing:0.09em;text-transform:uppercase;margin-top:1px;}
+#ptbadge{position:absolute;top:12px;right:12px;background:rgba(2,5,18,0.88);border:1px solid rgba(0,255,231,0.16);border-radius:5px;padding:6px 11px;backdrop-filter:blur(12px);font-family:var(--mono);font-size:0.44rem;letter-spacing:0.09em;text-transform:uppercase;color:var(--dim);}
+#ptbadge em{color:var(--scan);font-style:normal;font-size:0.66rem;}
+#model-ctrl{position:absolute;bottom:12px;right:12px;display:flex;flex-direction:column;gap:5px;align-items:flex-end;}
+.mc-btn{background:rgba(2,5,18,0.86);border:1px solid rgba(0,255,231,0.2);color:var(--dim);font-family:var(--mono);font-size:0.44rem;letter-spacing:0.08em;text-transform:uppercase;padding:4px 10px;border-radius:3px;cursor:pointer;transition:all .15s;backdrop-filter:blur(12px);}
+.mc-btn:hover,.mc-btn.on{border-color:var(--scan);color:var(--scan);}
+#kbd-hint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:rgba(2,5,18,0.88);border:1px solid var(--border);border-radius:5px;padding:5px 12px;font-family:var(--mono);font-size:0.44rem;letter-spacing:0.08em;color:var(--dim);display:flex;align-items:center;gap:8px;backdrop-filter:blur(14px);white-space:nowrap;z-index:20;}
+.kbd{border:1px solid rgba(0,255,231,0.32);border-radius:2px;padding:1px 6px;color:var(--scan);font-size:0.50rem;}
+#step-info{position:absolute;bottom:44px;left:50%;transform:translateX(-50%);background:rgba(2,5,18,0.88);border:1px solid rgba(0,255,231,0.16);border-radius:4px;padding:5px 13px;font-family:var(--mono);font-size:0.46rem;letter-spacing:0.09em;color:var(--dim);backdrop-filter:blur(12px);white-space:nowrap;z-index:20;pointer-events:none;}
+#step-info em{color:var(--scan);font-style:normal;}
+
+/* BOTTOM */
+.bb-stat{font-family:var(--mono);font-size:0.44rem;letter-spacing:0.08em;color:var(--dim);display:flex;gap:5px;align-items:center;}
+.bb-stat em{color:var(--scan);font-style:normal;}
+.bb-sep{width:1px;height:9px;background:var(--border);}
+
+/* TOAST */
+#toast{position:fixed;top:52px;left:50%;transform:translateX(-50%) translateY(-10px);background:rgba(2,6,20,0.97);border:1px solid var(--scan);color:var(--text);padding:6px 18px;border-radius:30px;font-family:var(--mono);font-size:0.56rem;letter-spacing:0.09em;z-index:9999;display:none;backdrop-filter:blur(20px);box-shadow:0 0 18px rgba(0,255,231,0.22);animation:toastIn .2s ease;}
+@keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(-18px)}to{opacity:1;transform:translateX(-50%) translateY(-10px)}}
+
+/* BBOX */
+#bbox-layer{position:absolute;inset:0;z-index:22;display:none;cursor:crosshair;}
+#bbox-layer.on{display:block;}
+#bbox-guide{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;}
+.bg-step{font-family:var(--mono);font-size:0.7rem;letter-spacing:0.18em;color:var(--scan);text-shadow:0 0 12px rgba(0,255,231,0.55);margin-bottom:6px;}
+.bg-sub{font-family:var(--sans);font-size:0.9rem;color:var(--dim);font-weight:300;}
+</style>
+</head>
+<body>
+<div id="toast"></div>
+<div id="app">
+  <div id="topbar">
+    <div id="logo">ORBIT <span>360° Particle Scanner</span></div>
+    <div id="phase-badge">SETUP</div>
+    <div class="tb-stat">CAPTURES <em id="stat-caps">0</em>/<em id="stat-total">24</em></div>
+    <div class="tb-stat">PARTICLES <em id="stat-pts">0</em></div>
+    <div class="tb-stat">ANGLE <em id="stat-ang">0°</em></div>
+    <div id="tb-sep"></div>
+    <button class="tb-btn" onclick="resetScan()">↺ Reset</button>
+    <button class="tb-btn" onclick="exportPLY()">⬇ PLY</button>
+    <button class="tb-btn red" onclick="clearModel()">✕ Clear</button>
+  </div>
+
+  <div id="main">
+    <div id="left-pane">
+      <div id="cam-wrap">
+        <video id="cam-video" playsinline muted autoplay></video>
+        <canvas id="cam-canvas"></canvas>
+        <canvas id="grid-canvas"></canvas>
+        <div id="scanline"></div>
+        <div id="flash"></div>
+
+        <!-- INITIAL OVERLAY -->
+        <div id="overlay">
+          <div class="ov-title" id="ov-title">ORBIT SCANNER</div>
+          <div class="ov-sub" id="ov-sub">Press START CAMERA to begin.<br>Camera requires HTTPS or localhost.</div>
+          <div id="file-warn">
+            ⚠ FILE:// DETECTED — Camera blocked<br><br>
+            Run a local server:<br>
+            <code>python -m http.server 8000</code><br>
+            then open <code>http://localhost:8000</code><br><br>
+            Or use VS Code Live Server extension.
+          </div>
+          <button id="btn-start-cam" onclick="startCamera()">▶ START CAMERA</button>
+        </div>
+
+        <!-- CAMERA ERROR -->
+        <div id="cam-error">
+          <div class="ce-title">CAMERA UNAVAILABLE</div>
+          <div class="ce-body" id="ce-body">Camera access failed.</div>
+          <div class="ce-code" id="ce-code"></div>
+          <button class="tb-btn" onclick="startCamera()" style="margin-top:8px;">↺ Retry</button>
+        </div>
+
+        <!-- BBOX CALIBRATION -->
+        <div id="bbox-layer">
+          <div id="bbox-guide">
+            <div class="bg-step" id="bbox-step-lbl">CLICK TOP-LEFT CORNER</div>
+            <div class="bg-sub">Define your object bounding region</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="ctrl-panel">
+        <div class="ctrl-row">
+          <span class="ctrl-lbl">Grid Size</span>
+          <input type="range" id="sl-gs" min="30" max="95" value="68">
+          <span class="ctrl-val" id="vl-gs">68%</span>
+        </div>
+        <div class="ctrl-row">
+          <span class="ctrl-lbl">Grid Cells</span>
+          <input type="range" id="sl-gc" min="4" max="20" step="2" value="10">
+          <span class="ctrl-val" id="vl-gc">10</span>
+        </div>
+        <div class="ctrl-row">
+          <span class="ctrl-lbl">Depth</span>
+          <input type="range" id="sl-dp" min="0" max="2" step="1" value="1">
+          <span class="ctrl-val" id="vl-dp">LUMA</span>
+        </div>
+        <div class="ctrl-row">
+          <span class="ctrl-lbl">Density</span>
+          <input type="range" id="sl-dn" min="1" max="5" step="1" value="3">
+          <span class="ctrl-val" id="vl-dn">MED</span>
+        </div>
+        <hr class="ctrl-sep">
+        <div class="ctrl-row">
+          <div class="ctrl-chk"><input type="checkbox" id="chk-bg" checked><label for="chk-bg">BG Subtract</label></div>
+          <div class="ctrl-chk" style="margin-left:12px;"><input type="checkbox" id="chk-rc" checked><label for="chk-rc">Real Colour</label></div>
+        </div>
+        <hr class="ctrl-sep">
+        <div class="ctrl-row" style="gap:5px;">
+          <button class="tb-btn" onclick="captureBG()" style="flex:1;">⊡ Set BG</button>
+          <button class="tb-btn" onclick="startScan()" style="flex:1.4;">▶ Start Scan</button>
+          <button class="tb-btn" onclick="startCalibrate()" style="flex:1;">⊞ Grid</button>
+        </div>
+        <button id="btn-capture" onclick="captureFrame()" disabled>⊕ CAPTURE FRAME (SPACE)</button>
+        <div class="ctrl-row" style="gap:4px;">
+          <span class="ctrl-lbl" style="min-width:46px;">Rotate</span>
+          <button class="tb-btn" onclick="stepAngle(-30)" style="flex:1;">◀30°</button>
+          <button class="tb-btn" onclick="stepAngle(-15)" style="flex:1;">◀15°</button>
+          <button class="tb-btn" onclick="stepAngle(15)"  style="flex:1;">15°▶</button>
+          <button class="tb-btn" onclick="stepAngle(30)"  style="flex:1;">30°▶</button>
+        </div>
+        <div class="ctrl-row" style="gap:5px;">
+          <button class="tb-btn warn" onclick="autoSweep()" style="flex:1;">⚡ Full Auto Sweep</button>
+          <button class="tb-btn" id="btn-auto" onclick="toggleAuto()" style="flex:1;">AUTO: OFF</button>
+        </div>
+      </div>
+
+      <div id="ring-wrap">
+        <canvas id="ring-canvas" width="90" height="90"></canvas>
+        <div class="ring-info">
+          <div class="ri-row"><span class="ri-lbl">Coverage</span><span class="ri-val" id="ri-cov">0%</span></div>
+          <div class="ri-row"><span class="ri-lbl">Captures</span><span class="ri-val" id="ri-caps">0/24</span></div>
+          <div class="ri-row"><span class="ri-lbl">BG</span><span class="ri-val" id="ri-bg">NOT SET</span></div>
+          <div class="ri-row"><span class="ri-lbl">Source</span><span class="ri-val" id="ri-src">MANUAL</span></div>
+          <div id="prog-wrap"><div id="prog-bar"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="right-pane">
+      <canvas id="three-canvas"></canvas>
+      <div id="angle-hud">
+        <div class="ah-deg" id="ah-deg">0°</div>
+        <div class="ah-lbl">Capture Angle</div>
+        <div class="ah-src" id="ah-src">MANUAL / KEYBOARD</div>
+      </div>
+      <div id="ptbadge">PARTICLES <em id="pt3d">0</em></div>
+      <div id="model-ctrl">
+        <button class="mc-btn on" id="mc-rot" onclick="toggleAutoRot()">AUTO ROTATE: ON</button>
+        <button class="mc-btn" id="mc-col" onclick="cycleColor()">COLOR: REAL</button>
+        <button class="mc-btn" id="mc-sz"  onclick="cyclePtSz()">SIZE: MED</button>
+        <button class="mc-btn on" id="mc-ax"  onclick="toggleAxes()">AXES: ON</button>
+      </div>
+      <div id="step-info"><em id="si-txt">→ Press START CAMERA, then Set BG, then Start Scan</em></div>
+      <div id="kbd-hint">
+        <span class="kbd">←</span><span>−15°</span>&nbsp;
+        <span class="kbd">→</span><span>+15°</span>&nbsp;
+        <span class="kbd">SPACE</span><span>Capture</span>&nbsp;
+        <span class="kbd">B</span><span>Set BG</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="bottombar">
+    <div class="bb-stat">CAM <em id="bb-cam">WAITING</em></div>
+    <div class="bb-sep"></div>
+    <div class="bb-stat">STATUS <em id="bb-st">IDLE</em></div>
+    <div class="bb-sep"></div>
+    <div class="bb-stat">BG <em id="bb-bg">NOT SET</em></div>
+    <div class="bb-sep"></div>
+    <div class="bb-stat">DEPTH <em id="bb-dp">LUMA</em></div>
+    <div class="bb-sep"></div>
+    <div class="bb-stat">GYRO <em id="bb-gy">CHECKING</em></div>
+    <div style="flex:1;"></div>
+    <div class="bb-stat"><em>ORBIT 360° SCANNER</em></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+const STEP = 15, TOTAL = 24;
+
+const S = {
+  phase:'setup', camReady:false, angle:0,
+  captures:[], capturedAngles:new Set(),
+  bgData:null, hasBG:false,
+  gridSize:68, gridCells:10, depthMode:1, density:3,
+  origCol:true, bgSub:true, auto:false,
+  gyroActive:false, gyroBase:null,
+  bbox:{x1:0.08,y1:0.08,x2:0.92,y2:0.92},
+  bboxStep:0, bboxPt1:null,
+  autoRot:true, colorMode:0, ptSz:2,
+  totalPts:0, isDrag:false, dragX:0, dragY:0,
+  rotY:0, rotX:0.22,
+};
+
+const vid    = document.getElementById('cam-video');
+const camCv  = document.getElementById('cam-canvas');
+const gridCv = document.getElementById('grid-canvas');
+const ringCv = document.getElementById('ring-canvas');
+const flashEl= document.getElementById('flash');
+const scanEl = document.getElementById('scanline');
+const overEl = document.getElementById('overlay');
+const errEl  = document.getElementById('cam-error');
+
+let camCtx, gridCtx, ringCtx;
+let cW=0, cH=0;
+
+/* ──────── THREE.JS ──────── */
+let scene, cam3, rndr, ptMesh, ptGeo, posBuf, colBuf, axH;
+let tRotY=0, tRotX=0.22;
+
+function initThree(){
+  const cv=document.getElementById('three-canvas');
+  const wp=document.getElementById('right-pane');
+  scene=new THREE.Scene();
+  cam3=new THREE.PerspectiveCamera(55,wp.clientWidth/wp.clientHeight,1,8000);
+  cam3.position.set(0,60,660);
+  rndr=new THREE.WebGLRenderer({canvas:cv,antialias:false,alpha:true});
+  rndr.setPixelRatio(Math.min(devicePixelRatio,2));
+  rndr.setSize(wp.clientWidth,wp.clientHeight);
+  rndr.setClearColor(0x010308,1);
+  scene.add(new THREE.GridHelper(700,24,0x001428,0x001428)).position.y=-170;
+  axH=new THREE.AxesHelper(120); scene.add(axH);
+  const rp=[]; for(let i=0;i<=72;i++){const a=(i/72)*Math.PI*2;rp.push(Math.cos(a)*280,-170,Math.sin(a)*280);}
+  const rg=new THREE.BufferGeometry();rg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(rp),3));
+  scene.add(new THREE.Line(rg,new THREE.LineBasicMaterial({color:0x00ffe7,opacity:0.1,transparent:true})));
+  const ci=new THREE.Mesh(new THREE.SphereGeometry(7,7,5),new THREE.MeshBasicMaterial({color:0x00ffe7,transparent:true,opacity:0.7}));
+  window._ci=ci; scene.add(ci);
+  allocCloud(0);
+  const wp2=document.getElementById('right-pane');
+  wp2.addEventListener('mousedown',e=>{S.isDrag=true;S.dragX=e.clientX;S.dragY=e.clientY;S.autoRot=false;document.getElementById('mc-rot').textContent='AUTO ROTATE: OFF';document.getElementById('mc-rot').classList.remove('on');});
+  window.addEventListener('mousemove',e=>{if(!S.isDrag)return;S.rotY+=(e.clientX-S.dragX)*0.009;S.rotX+=(e.clientY-S.dragY)*0.007;S.rotX=Math.max(-1.3,Math.min(1.3,S.rotX));S.dragX=e.clientX;S.dragY=e.clientY;tRotY=S.rotY;tRotX=S.rotX;});
+  window.addEventListener('mouseup',()=>S.isDrag=false);
+  wp2.addEventListener('wheel',e=>{cam3.position.z=Math.max(80,Math.min(2400,cam3.position.z+e.deltaY*.5));},{passive:true});
+  window.addEventListener('resize',on3DResize);
+  loop3D();
+}
+
+function allocCloud(n){
+  if(ptMesh){scene.remove(ptMesh);ptGeo.dispose();ptMesh.material.dispose();}
+  const cap=Math.max(n,1);
+  ptGeo=new THREE.BufferGeometry();
+  posBuf=new Float32Array(cap*3);colBuf=new Float32Array(cap*3);
+  ptGeo.setAttribute('position',new THREE.BufferAttribute(posBuf,3));
+  ptGeo.setAttribute('color',new THREE.BufferAttribute(colBuf,3));
+  ptGeo.setDrawRange(0,n);
+  const sz=[0.4,0.85,1.5,2.8,4.5][S.ptSz];
+  ptMesh=new THREE.Points(ptGeo,new THREE.PointsMaterial({size:sz,vertexColors:true,transparent:true,opacity:0.92,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true}));
+  scene.add(ptMesh); S.totalPts=n; updPts();
+}
+
+function loop3D(){
+  requestAnimationFrame(loop3D);
+  if(!rndr)return;
+  if(S.autoRot&&!S.isDrag) tRotY+=0.004;
+  if(ptMesh){ptMesh.rotation.y+=(tRotY-ptMesh.rotation.y)*.07;ptMesh.rotation.x+=(tRotX-ptMesh.rotation.x)*.07;}
+  if(window._ci){const r=S.angle*Math.PI/180;window._ci.position.set(Math.sin(r)*280,-170,Math.cos(r)*280);}
+  rndr.render(scene,cam3);
+}
+
+function on3DResize(){const wp=document.getElementById('right-pane');cam3.aspect=wp.clientWidth/wp.clientHeight;cam3.updateProjectionMatrix();rndr.setSize(wp.clientWidth,wp.clientHeight);sizeCamCv();}
+function updPts(){document.getElementById('pt3d').textContent=S.totalPts.toLocaleString();document.getElementById('stat-pts').textContent=S.totalPts.toLocaleString();}
+
+/* ──────── CAMERA ──────── */
+async function startCamera(){
+  const btn=document.getElementById('btn-start-cam');
+  btn.disabled=true; btn.textContent='⏳ STARTING…';
+  document.getElementById('ov-title').textContent='REQUESTING CAMERA';
+  document.getElementById('ov-sub').textContent='Allow access when prompted…';
+
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    showErr('getUserMedia not available','Try Chrome or Firefox.\nMust be served from localhost or HTTPS.');
+    btn.disabled=false;btn.textContent='↺ RETRY';return;
+  }
+
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({
+      video:{width:{ideal:1280,min:320},height:{ideal:720,min:240}}
+    });
+    vid.srcObject=stream;
+
+    // Wait for metadata (gives video dimensions)
+    await new Promise(res=>{
+      if(vid.readyState>=1){res();return;}
+      const fn=()=>{vid.removeEventListener('loadedmetadata',fn);res();};
+      vid.addEventListener('loadedmetadata',fn);
+      setTimeout(()=>{vid.removeEventListener('loadedmetadata',fn);res();},4000);
+    });
+
+    try{await vid.play();}catch(_){}
+    await new Promise(r=>setTimeout(r,500)); // let first frames render
+
+    sizeCamCv();
+
+    const vw=vid.videoWidth||cW;
+    const vh=vid.videoHeight||cH;
+    document.getElementById('bb-cam').textContent=`${vw}×${vh}`;
+    S.camReady=true;
+
+    overEl.classList.add('hidden');
+    errEl.classList.remove('show');
+    document.getElementById('bb-st').textContent='CAM OK';
+    camDrawLoop();
+    toast('Camera ready ✓  —  Set BG → Start Scan → Capture');
+  }catch(e){
+    let hint='';
+    if(e.name==='NotAllowedError'||e.name==='PermissionDeniedError') hint='Click the camera icon in the address bar and ALLOW access, then retry.';
+    else if(e.name==='NotFoundError') hint='No camera detected. Plug in a webcam.';
+    else if(e.name==='NotReadableError') hint='Camera is in use by another application.';
+    else if(location.protocol==='file:') hint='file:// blocks camera.\nRun: python -m http.server 8000\nOpen: http://localhost:8000';
+    showErr(e.message||String(e), hint);
+    btn.disabled=false;btn.textContent='↺ RETRY';
+  }
+}
+
+function showErr(msg,hint){
+  overEl.classList.add('hidden');
+  errEl.classList.add('show');
+  document.getElementById('ce-body').textContent=hint||msg;
+  document.getElementById('ce-code').textContent='ERROR: '+msg+(location.protocol==='file:'?'\n\nFIX:\npython -m http.server 8000\nhttp://localhost:8000':'');
+}
+
+function sizeCamCv(){
+  const w=document.getElementById('cam-wrap');
+  const W=w.clientWidth,H=w.clientHeight;
+  if(!W||!H)return;
+  camCv.width=W;camCv.height=H;
+  gridCv.width=W;gridCv.height=H;
+  cW=W;cH=H;
+  camCtx=camCv.getContext('2d',{willReadFrequently:true});
+  gridCtx=gridCv.getContext('2d');
+}
+
+function camDrawLoop(){
+  requestAnimationFrame(camDrawLoop);
+  if(!camCtx||!S.camReady)return;
+  const W=camCv.width,H=camCv.height;
+  if(!W||!H)return;
+  camCtx.save();camCtx.translate(W,0);camCtx.scale(-1,1);
+  try{camCtx.drawImage(vid,0,0,W,H);}catch(_){}
+  camCtx.restore();
+}
+
+/* ──────── BG CAPTURE ──────── */
+function captureBG(){
+  if(!S.camReady){toast('Start camera first');return;}
+  sizeCamCv();
+  const W=cW,H=cH;
+  if(!W||!H){toast('Canvas not ready');return;}
+  camCtx.save();camCtx.translate(W,0);camCtx.scale(-1,1);
+  try{camCtx.drawImage(vid,0,0,W,H);}catch(e){toast('Frame not ready yet');camCtx.restore();return;}
+  camCtx.restore();
+  try{
+    S.bgData=camCtx.getImageData(0,0,W,H);
+    S.hasBG=true;
+    document.getElementById('bb-bg').textContent='SET ✓';document.getElementById('bb-bg').style.color='#4ade80';
+    document.getElementById('ri-bg').textContent='SET ✓';
+    flashEl.style.opacity='1';setTimeout(()=>flashEl.style.opacity='0',80);
+    toast('Background set ✓  —  now Start Scan');
+  }catch(e){toast('BG error: '+e.message);}
+}
+
+/* ──────── SCAN PHASE ──────── */
+function startScan(){
+  if(!S.camReady){toast('Start camera first (click START CAMERA)');return;}
+  S.phase='scanning';
+  document.getElementById('phase-badge').textContent='SCANNING';
+  document.getElementById('phase-badge').className='scanning';
+  document.getElementById('btn-capture').disabled=false;
+  document.getElementById('bb-st').textContent='SCANNING';
+  scanEl.classList.add('on');
+  document.getElementById('si-txt').innerHTML='Move laptop around object — <em>← →</em> set angle — <em>SPACE</em> capture';
+  toast('Scan started!  Use ← → to set angle, SPACE to capture');
+}
+
+/* ──────── CAPTURE FRAME ──────── */
+function captureFrame(){
+  if(!S.camReady){toast('Camera not ready — click START CAMERA first');return;}
+  if(S.phase!=='scanning'){toast('Click START SCAN first');return;}
+  if(!cW||!cH){sizeCamCv();}
+  const W=cW,H=cH;
+  if(!W||!H){toast('Canvas size error');return;}
+
+  // Draw latest frame
+  camCtx.save();camCtx.translate(W,0);camCtx.scale(-1,1);
+  try{camCtx.drawImage(vid,0,0,W,H);}catch(e){toast('Video frame error');camCtx.restore();return;}
+  camCtx.restore();
+
+  let imgData;
+  try{imgData=camCtx.getImageData(0,0,W,H);}
+  catch(e){toast('Canvas read error — try serving from localhost');return;}
+
+  const px=imgData.data;
+  const bg=(S.hasBG&&S.bgSub&&S.bgData)?S.bgData.data:null;
+
+  const bx1=Math.floor(S.bbox.x1*W),by1=Math.floor(S.bbox.y1*H);
+  const bx2=Math.floor(S.bbox.x2*W),by2=Math.floor(S.bbox.y2*H);
+  const rw=bx2-bx1,rh=by2-by1;
+  if(rw<10||rh<10){toast('Grid too small, recalibrate');return;}
+
+  const stepLut=[8,5,3,2,1];
+  const step=stepLut[S.density-1]||3;
+  const aRad=S.angle*Math.PI/180;
+  const cosA=Math.cos(aRad),sinA=Math.sin(aRad);
+  const pts=[];
+
+  for(let y=by1;y<by2;y+=step){
+    for(let x=bx1;x<bx2;x+=step){
+      const i=(y*W+x)*4;
+      const r=px[i],g=px[i+1],b=px[i+2],a=px[i+3];
+      if(a<16)continue;
+      if(bg){const dr=Math.abs(r-bg[i]),dg=Math.abs(g-bg[i+1]),db=Math.abs(b-bg[i+2]);if(dr+dg+db<28)continue;}
+      const luma=(0.299*r+0.587*g+0.114*b)/255;
+      if(luma<0.03)continue;
+      const nx=((x-bx1)/rw-.5)*2;
+      const ny=-((y-by1)/rh-.5)*2;
+      const sc=160;
+      const px3=nx*sc, py3=ny*sc*.8;
+      let pz=0;
+      if(S.depthMode===1) pz=(luma-.5)*55;
+      else if(S.depthMode===2) pz=(1-Math.sqrt(nx*nx+ny*ny*.5))*35;
+      const wx= px3*cosA+pz*sinA;
+      const wy= py3;
+      const wz=-px3*sinA+pz*cosA;
+      pts.push({x:wx,y:wy,z:wz,r:r/255,g:g/255,b:b/255,angle:S.angle});
+    }
+  }
+
+  if(!pts.length){toast(S.hasBG?'No foreground — is object in frame?':'Captured! (Set BG for better isolation)');if(!S.hasBG&&pts.length===0)return;}
+  if(!pts.length)return;
+
+  S.captures.push({angle:S.angle,points:pts});
+  S.capturedAngles.add(S.angle);
+  addPtsToCloud(pts);
+
+  const cc=S.capturedAngles.size;
+  document.getElementById('stat-caps').textContent=cc;
+  document.getElementById('ri-caps').textContent=cc+'/'+TOTAL;
+  document.getElementById('ri-cov').textContent=Math.round(cc/TOTAL*100)+'%';
+  document.getElementById('prog-bar').style.width=(cc/TOTAL*100)+'%';
+  flashEl.style.opacity='1';setTimeout(()=>flashEl.style.opacity='0',75);
+  toast('✓ '+pts.length.toLocaleString()+' pts @ '+S.angle+'°');
+
+  if(cc>=TOTAL){
+    S.phase='complete';
+    document.getElementById('phase-badge').textContent='360° COMPLETE';
+    document.getElementById('phase-badge').className='complete';
+    scanEl.classList.remove('on');
+    document.getElementById('si-txt').innerHTML='<em>Scan complete!</em>  Drag to rotate · Export PLY';
+    toast('🎉 360° scan complete!');
+  }
+}
+
+/* ──────── ADD TO CLOUD ──────── */
+function addPtsToCloud(pts){
+  const old=S.totalPts,total=old+pts.length;
+  if(total>(posBuf?posBuf.length/3:0)){
+    const np=new Float32Array(total*3),nc=new Float32Array(total*3);
+    if(posBuf){np.set(posBuf.subarray(0,old*3));nc.set(colBuf.subarray(0,old*3));}
+    if(ptMesh){scene.remove(ptMesh);ptGeo.dispose();ptMesh.material.dispose();}
+    ptGeo=new THREE.BufferGeometry();posBuf=np;colBuf=nc;
+    ptGeo.setAttribute('position',new THREE.BufferAttribute(posBuf,3));
+    ptGeo.setAttribute('color',new THREE.BufferAttribute(colBuf,3));
+    ptGeo.setDrawRange(0,total);
+    const sz=[0.4,0.85,1.5,2.8,4.5][S.ptSz];
+    ptMesh=new THREE.Points(ptGeo,new THREE.PointsMaterial({size:sz,vertexColors:true,transparent:true,opacity:0.92,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true}));
+    scene.add(ptMesh);
+  } else {ptGeo.setDrawRange(0,total);}
+  const mc=new THREE.Color(0x00ffe7);
+  pts.forEach((p,i)=>{
+    const k=(old+i)*3;
+    posBuf[k]=p.x;posBuf[k+1]=p.y;posBuf[k+2]=p.z;
+    if(S.colorMode===0&&S.origCol){colBuf[k]=p.r;colBuf[k+1]=p.g;colBuf[k+2]=p.b;}
+    else if(S.colorMode===1){const c=new THREE.Color().setHSL(p.angle/360,1,.55);colBuf[k]=c.r;colBuf[k+1]=c.g;colBuf[k+2]=c.b;}
+    else{colBuf[k]=mc.r;colBuf[k+1]=mc.g;colBuf[k+2]=mc.b;}
+  });
+  ptGeo.attributes.position.needsUpdate=true;ptGeo.attributes.color.needsUpdate=true;
+  S.totalPts=total;updPts();
+}
+
+/* ──────── ANGLE ──────── */
+function setAngle(d){
+  S.angle=((Math.round(d)%360)+360)%360;
+  document.getElementById('stat-ang').textContent=S.angle+'°';
+  document.getElementById('ah-deg').textContent=S.angle+'°';
+}
+function stepAngle(d){setAngle(S.angle+d);}
+
+/* ──────── AUTO SWEEP ──────── */
+async function autoSweep(){
+  if(!S.camReady){toast('Start camera first');return;}
+  if(S.phase!=='scanning'){startScan();await new Promise(r=>setTimeout(r,400));}
+  toast('⚡ Auto sweep — keep object centred!');
+  for(let a=0;a<360;a+=STEP){
+    setAngle(a);await new Promise(r=>setTimeout(r,300));
+    captureFrame();await new Promise(r=>setTimeout(r,150));
+  }
+  toast('Auto sweep done!');
+}
+
+function toggleAuto(){
+  S.auto=!S.auto;
+  document.getElementById('btn-auto').textContent='AUTO: '+(S.auto?'ON':'OFF');
+  document.getElementById('btn-auto').classList.toggle('on',S.auto);
+  toast('Auto capture: '+(S.auto?'ON':'OFF'));
+}
+
+/* ──────── CALIBRATE BBOX ──────── */
+function startCalibrate(){
+  S.bboxStep=1;S.bboxPt1=null;
+  document.getElementById('bbox-layer').classList.add('on');
+  document.getElementById('bbox-step-lbl').textContent='CLICK TOP-LEFT CORNER';
+  toast('Click the top-left corner of your object');
+}
+document.getElementById('bbox-layer').addEventListener('click',e=>{
+  const rect=e.currentTarget.getBoundingClientRect();
+  const nx=(e.clientX-rect.left)/rect.width,ny=(e.clientY-rect.top)/rect.height;
+  if(S.bboxStep===1){S.bboxPt1={x:nx,y:ny};S.bboxStep=2;document.getElementById('bbox-step-lbl').textContent='CLICK BOTTOM-RIGHT CORNER';toast('Now click the bottom-right corner');}
+  else if(S.bboxStep===2){S.bbox={x1:Math.min(S.bboxPt1.x,nx),y1:Math.min(S.bboxPt1.y,ny),x2:Math.max(S.bboxPt1.x,nx),y2:Math.max(S.bboxPt1.y,ny)};S.bboxStep=0;document.getElementById('bbox-layer').classList.remove('on');toast('Grid region set ✓');}
+});
+
+/* ──────── GRID ──────── */
+function drawGrid(){
+  if(!gridCtx||!cW||!cH)return;
+  const W=cW,H=cH;
+  gridCtx.clearRect(0,0,W,H);
+  const bx1=Math.floor(S.bbox.x1*W),by1=Math.floor(S.bbox.y1*H);
+  const bx2=Math.floor(S.bbox.x2*W),by2=Math.floor(S.bbox.y2*H);
+  const rx=bx1,ry=by1,rw=bx2-bx1,rh=by2-by1;
+  const cx=rx+rw/2,cy=ry+rh/2,cells=S.gridCells;
+
+  gridCtx.save();gridCtx.shadowBlur=12;gridCtx.shadowColor='#00ffe7';
+  gridCtx.strokeStyle='rgba(0,255,231,0.55)';gridCtx.lineWidth=1.5;gridCtx.strokeRect(rx,ry,rw,rh);gridCtx.restore();
+
+  gridCtx.strokeStyle='rgba(0,255,231,0.11)';gridCtx.lineWidth=0.5;
+  for(let i=1;i<cells;i++){
+    const gx=rx+(rw/cells)*i,gy2=ry+(rh/cells)*i;
+    gridCtx.beginPath();gridCtx.moveTo(gx,ry);gridCtx.lineTo(gx,ry+rh);gridCtx.stroke();
+    gridCtx.beginPath();gridCtx.moveTo(rx,gy2);gridCtx.lineTo(rx+rw,gy2);gridCtx.stroke();
+  }
+
+  gridCtx.strokeStyle='rgba(0,255,231,0.42)';gridCtx.lineWidth=1;
+  const cs=18;
+  gridCtx.beginPath();gridCtx.moveTo(cx-cs,cy);gridCtx.lineTo(cx+cs,cy);gridCtx.stroke();
+  gridCtx.beginPath();gridCtx.moveTo(cx,cy-cs);gridCtx.lineTo(cx,cy+cs);gridCtx.stroke();
+  gridCtx.beginPath();gridCtx.arc(cx,cy,3,0,Math.PI*2);gridCtx.fillStyle='rgba(0,255,231,0.65)';gridCtx.fill();
+
+  const tk=13;gridCtx.strokeStyle='rgba(0,255,231,0.8)';gridCtx.lineWidth=2;
+  [[rx,ry,1,1],[rx+rw,ry,-1,1],[rx,ry+rh,1,-1],[rx+rw,ry+rh,-1,-1]].forEach(([x,y,sx,sy])=>{
+    gridCtx.beginPath();gridCtx.moveTo(x,y);gridCtx.lineTo(x+sx*tk,y);gridCtx.stroke();
+    gridCtx.beginPath();gridCtx.moveTo(x,y);gridCtx.lineTo(x,y+sy*tk);gridCtx.stroke();
+  });
+
+  gridCtx.beginPath();gridCtx.arc(cx,cy,Math.min(rw,rh)*.36,0,Math.PI*2);
+  gridCtx.strokeStyle='rgba(0,255,231,0.07)';gridCtx.lineWidth=1;
+  gridCtx.setLineDash([4,4]);gridCtx.stroke();gridCtx.setLineDash([]);
+
+  if(S.phase==='scanning'||S.phase==='complete'){
+    const ar=S.angle*Math.PI/180-Math.PI/2;
+    const aLen=Math.min(rw,rh)*.4;
+    const arx=cx+Math.cos(ar)*aLen,ary=cy+Math.sin(ar)*aLen;
+    gridCtx.beginPath();gridCtx.moveTo(cx,cy);gridCtx.lineTo(arx,ary);
+    gridCtx.strokeStyle='rgba(255,190,0,0.65)';gridCtx.lineWidth=1.5;gridCtx.stroke();
+    const ha=0.4,hl=10;
+    gridCtx.beginPath();gridCtx.moveTo(arx,ary);
+    gridCtx.lineTo(arx-hl*Math.cos(ar-ha),ary-hl*Math.sin(ar-ha));
+    gridCtx.lineTo(arx-hl*Math.cos(ar+ha),ary-hl*Math.sin(ar+ha));
+    gridCtx.closePath();gridCtx.fillStyle='rgba(255,190,0,0.7)';gridCtx.fill();
+  }
+
+  S.capturedAngles.forEach(a=>{
+    const r2=a*Math.PI/180-Math.PI/2,mr=Math.min(rw,rh)*.45;
+    gridCtx.beginPath();gridCtx.arc(cx+Math.cos(r2)*mr,cy+Math.sin(r2)*mr,4,0,Math.PI*2);
+    gridCtx.fillStyle='rgba(74,222,128,0.7)';gridCtx.fill();
+  });
+
+  gridCtx.font='8px Share Tech Mono';gridCtx.fillStyle='rgba(0,255,231,0.35)';
+  gridCtx.textAlign='left';gridCtx.fillText(`${S.angle}°  ${S.gridSize}%  ${cells}×${cells}`,rx+4,ry+11);
+}
+
+/* ──────── RING ──────── */
+function drawRing(){
+  if(!ringCtx)ringCtx=ringCv.getContext('2d');
+  const W=ringCv.width,H=ringCv.height,cx=W/2,cy=H/2,R=W*.38;
+  ringCtx.clearRect(0,0,W,H);
+  ringCtx.beginPath();ringCtx.arc(cx,cy,R,0,Math.PI*2);
+  ringCtx.strokeStyle='rgba(0,255,231,0.1)';ringCtx.lineWidth=4;ringCtx.stroke();
+  S.capturedAngles.forEach(a=>{
+    const rad=a*Math.PI/180-Math.PI/2,span=STEP*Math.PI/180;
+    ringCtx.beginPath();ringCtx.arc(cx,cy,R,rad,rad+span);
+    ringCtx.strokeStyle='rgba(74,222,128,0.72)';ringCtx.lineWidth=4;ringCtx.stroke();
+  });
+  const cur=S.angle*Math.PI/180-Math.PI/2;
+  ringCtx.beginPath();ringCtx.arc(cx,cy,R,cur-.14,cur+.14);
+  ringCtx.strokeStyle='#ffbe00';ringCtx.lineWidth=5;ringCtx.stroke();
+  ringCtx.beginPath();ringCtx.moveTo(cx,cy);ringCtx.lineTo(cx+Math.cos(cur)*R*.6,cy+Math.sin(cur)*R*.6);
+  ringCtx.strokeStyle='rgba(255,190,0,0.65)';ringCtx.lineWidth=1.5;ringCtx.stroke();
+  ringCtx.beginPath();ringCtx.arc(cx,cy,3,0,Math.PI*2);ringCtx.fillStyle='rgba(0,255,231,0.5)';ringCtx.fill();
+  ringCtx.font='7px Share Tech Mono';ringCtx.textAlign='center';ringCtx.textBaseline='middle';
+  [['N',0],['E',90],['S',180],['W',270]].forEach(([l,a])=>{
+    const r=a*Math.PI/180-Math.PI/2;
+    ringCtx.fillStyle='rgba(0,255,231,0.3)';
+    ringCtx.fillText(l,cx+Math.cos(r)*(R+9),cy+Math.sin(r)*(R+9));
+  });
+}
+
+/* ──────── GYRO ──────── */
+function initGyro(){
+  const el=document.getElementById('bb-gy');
+  if(!window.DeviceOrientationEvent){el.textContent='NONE';return;}
+  const onO=e=>{
+    if(e.alpha==null)return;
+    if(!S.gyroActive){
+      S.gyroActive=true;S.gyroBase=e.alpha;
+      el.textContent='ACTIVE';el.style.color='#4ade80';
+      document.getElementById('ri-src').textContent='GYRO';
+      document.getElementById('ah-src').textContent='GYROSCOPE';
+      toast('Gyro detected — walk around object');
+    }
+    if(S.phase!=='scanning')return;
+    const rel=((e.alpha-S.gyroBase)+360)%360;
+    setAngle(rel);
+    if(S.auto){const sn=Math.round(rel/STEP)*STEP;if(Math.abs(rel-sn)<2.5&&!S.capturedAngles.has(sn%360)){setAngle(sn);captureFrame();}}
+  };
+  if(typeof DeviceOrientationEvent.requestPermission==='function'){
+    document.querySelector('[onclick="startScan()"]')?.addEventListener('click',()=>DeviceOrientationEvent.requestPermission().then(s=>{if(s==='granted')window.addEventListener('deviceorientation',onO);}),{once:true});
+  } else {
+    window.addEventListener('deviceorientation',onO);
+    setTimeout(()=>{if(!S.gyroActive)el.textContent='MANUAL';},2500);
+  }
+}
+
+/* ──────── MODEL CONTROLS ──────── */
+function toggleAutoRot(){S.autoRot=!S.autoRot;const b=document.getElementById('mc-rot');b.textContent='AUTO ROTATE: '+(S.autoRot?'ON':'OFF');b.classList.toggle('on',S.autoRot);}
+function cycleColor(){
+  S.colorMode=(S.colorMode+1)%3;
+  document.getElementById('mc-col').textContent=['COLOR: REAL','COLOR: ANGLE HUE','COLOR: CYAN'][S.colorMode];
+  recolor();
+}
+function cyclePtSz(){
+  S.ptSz=(S.ptSz+1)%5;
+  document.getElementById('mc-sz').textContent=['SIZE: NANO','SIZE: TINY','SIZE: MED','SIZE: LARGE','SIZE: XL'][S.ptSz];
+  if(ptMesh)ptMesh.material.size=[0.4,0.85,1.5,2.8,4.5][S.ptSz];
+}
+function toggleAxes(){S.showAxes=!S.showAxes;axH.visible=S.showAxes;const b=document.getElementById('mc-ax');b.textContent='AXES: '+(S.showAxes?'ON':'OFF');b.classList.toggle('on',S.showAxes);}
+function recolor(){
+  if(!colBuf||!S.totalPts)return;
+  const mc=new THREE.Color(0x00ffe7);let k=0;
+  S.captures.forEach(c=>c.points.forEach(p=>{if(k>=S.totalPts)return;const i3=k*3;
+    if(S.colorMode===0){colBuf[i3]=p.r;colBuf[i3+1]=p.g;colBuf[i3+2]=p.b;}
+    else if(S.colorMode===1){const c2=new THREE.Color().setHSL(p.angle/360,1,.55);colBuf[i3]=c2.r;colBuf[i3+1]=c2.g;colBuf[i3+2]=c2.b;}
+    else{colBuf[i3]=mc.r;colBuf[i3+1]=mc.g;colBuf[i3+2]=mc.b;}k++;}));
+  if(ptGeo)ptGeo.attributes.color.needsUpdate=true;
+}
+
+/* ──────── RESET / CLEAR / EXPORT ──────── */
+function resetScan(){
+  S.phase='setup';S.angle=0;S.captures=[];S.capturedAngles.clear();S.totalPts=0;S.bgData=null;S.hasBG=false;
+  document.getElementById('phase-badge').textContent='SETUP';document.getElementById('phase-badge').className='';
+  document.getElementById('btn-capture').disabled=true;
+  document.getElementById('stat-caps').textContent='0';document.getElementById('ri-caps').textContent='0/'+TOTAL;
+  document.getElementById('ri-cov').textContent='0%';document.getElementById('prog-bar').style.width='0%';
+  document.getElementById('bb-bg').textContent='NOT SET';document.getElementById('bb-bg').style.color='';
+  document.getElementById('ri-bg').textContent='NOT SET';document.getElementById('bb-st').textContent='IDLE';
+  scanEl.classList.remove('on');setAngle(0);allocCloud(0);drawRing();toast('Scan reset');
+}
+function clearModel(){S.captures=[];S.capturedAngles.clear();S.totalPts=0;allocCloud(0);document.getElementById('stat-caps').textContent='0';document.getElementById('ri-caps').textContent='0/'+TOTAL;document.getElementById('ri-cov').textContent='0%';document.getElementById('prog-bar').style.width='0%';drawRing();toast('Model cleared');}
+function exportPLY(){
+  if(!S.totalPts){toast('No particles yet');return;}
+  let ply=`ply\nformat ascii 1.0\nelement vertex ${S.totalPts}\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nend_header\n`;
+  const L=[];S.captures.forEach(c=>c.points.forEach(p=>L.push(`${p.x.toFixed(3)} ${p.y.toFixed(3)} ${p.z.toFixed(3)} ${Math.round(p.r*255)} ${Math.round(p.g*255)} ${Math.round(p.b*255)}`)));
+  const b=new Blob([ply+L.join('\n')],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`orbit-${Date.now()}.ply`;a.click();
+  toast(`Exported ${S.totalPts.toLocaleString()} pts`);
+}
+
+/* ──────── TOAST ──────── */
+function toast(msg){const el=document.getElementById('toast');el.textContent=msg;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',3200);}
+
+/* ──────── SLIDERS ──────── */
+function bindSliders(){
+  document.getElementById('sl-gs').oninput=e=>{S.gridSize=+e.target.value;document.getElementById('vl-gs').textContent=S.gridSize+'%';};
+  document.getElementById('sl-gc').oninput=e=>{S.gridCells=+e.target.value;document.getElementById('vl-gc').textContent=S.gridCells;};
+  document.getElementById('sl-dp').oninput=e=>{S.depthMode=+e.target.value;const l=['FLAT','LUMA','RADIAL'];document.getElementById('vl-dp').textContent=l[S.depthMode];document.getElementById('bb-dp').textContent=l[S.depthMode];};
+  document.getElementById('sl-dn').oninput=e=>{S.density=+e.target.value;document.getElementById('vl-dn').textContent=['MIN','LOW','MED','HIGH','MAX'][S.density-1];};
+  document.getElementById('chk-bg').onchange=e=>S.bgSub=e.target.checked;
+  document.getElementById('chk-rc').onchange=e=>S.origCol=e.target.checked;
+}
+
+/* ──────── KEYS ──────── */
+document.addEventListener('keydown',e=>{
+  if(['INPUT','TEXTAREA'].includes(e.target.tagName))return;
+  if(e.key==='ArrowLeft'){e.preventDefault();stepAngle(-STEP);}
+  if(e.key==='ArrowRight'){e.preventDefault();stepAngle(+STEP);}
+  if(e.key==='ArrowUp'){e.preventDefault();stepAngle(-5);}
+  if(e.key==='ArrowDown'){e.preventDefault();stepAngle(+5);}
+  if(e.key===' '){e.preventDefault();captureFrame();}
+  if(e.key==='b'||e.key==='B')captureBG();
+});
+
+/* ──────── UI LOOP ──────── */
+function uiLoop(){requestAnimationFrame(uiLoop);if(S.camReady){drawGrid();drawRing();}}
+
+/* ──────── BOOT ──────── */
+document.addEventListener('DOMContentLoaded',()=>{
+  ringCtx=ringCv.getContext('2d');
+  if(location.protocol==='file:'){
+    document.getElementById('file-warn').classList.add('show');
+    document.getElementById('ov-title').textContent='LOCAL SERVER REQUIRED';
+    document.getElementById('ov-sub').textContent='Camera is blocked on file://';
+  }
+  initThree();bindSliders();initGyro();
+  setAngle(0);drawRing();
+  document.getElementById('stat-total').textContent=TOTAL;
+  window.addEventListener('resize',()=>{if(S.camReady)sizeCamCv();});
+  uiLoop();
+});
+</script>
+</body>
+</html>
